@@ -1,0 +1,19 @@
+{
+  "name": "@yaffle/cli",
+  "version": "0.1.0",
+  "description": "Yaffle CLI",
+  "type": "module",
+  "bin": {
+    "yaffle": "./src/main.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@yaffle/client": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}
