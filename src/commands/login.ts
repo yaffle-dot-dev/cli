@@ -15,16 +15,14 @@ import {
   saveConfig,
 } from "@yaffle/client"
 
-const DEFAULT_HOST = "https://yaffle.dev"
 const DEFAULT_API_URL = "https://yaffle.dev"
 
-function getSettingsUrl(): string {
-  const host = process.env.YAFFLE_HOST ?? DEFAULT_HOST
-  return `${host.replace(/\/+$/, "")}/app/settings`
+function getApiUrl(): string {
+  return process.env.YAFFLE_API_URL ?? DEFAULT_API_URL
 }
 
-function getApiUrl(): string {
-  return process.env.YAFFLE_HOST ?? DEFAULT_API_URL
+function getSettingsUrl(apiUrl: string): string {
+  return `${apiUrl.replace(/\/+$/, "")}/app/settings`
 }
 
 export async function login(args: string[]): Promise<void> {
@@ -35,7 +33,7 @@ export async function login(args: string[]): Promise<void> {
     apiUrl = args[apiUrlIdx + 1]
   }
 
-  const settingsUrl = getSettingsUrl()
+  const settingsUrl = getSettingsUrl(apiUrl)
 
   console.log("Yaffle CLI Login")
   console.log()
