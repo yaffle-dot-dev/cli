@@ -12,8 +12,7 @@ import {
   type TerraformOutput,
 } from "@yaffle/client"
 import { execSync } from "node:child_process"
-
-const DEFAULT_API_URL = "https://yaffle.local:6969"
+import { DEFAULT_API_URL, resolveApiUrl } from "../lib/api-url.js"
 
 const HELP = `
 Usage: yaffle outputs [options]
@@ -80,7 +79,12 @@ export async function outputs(args: string[]): Promise<void> {
 async function parseArgs(args: string[]): Promise<Args> {
   const config = await loadConfig()
 
-  const apiUrl = getArg(args, "--api-url") || config.apiUrl || DEFAULT_API_URL
+  const apiUrl = resolveApiUrl({
+    flagValue: getArg(args, "--api-url"),
+    envValue: process.env.YAFFLE_API_URL,
+    configValue: config.apiUrl,
+    defaultValue: DEFAULT_API_URL,
+  })
 
   // Parse target
   const prStr = getArg(args, "--pr")
@@ -112,28 +116,25 @@ async function parseArgs(args: string[]): Promise<Args> {
 }
 
 async function createClient(apiUrl: string): Promise<YaffleClient> {
-  // Try stored credentials first
-  const host = getHost(apiUrl)
-  const stored = await getCredentials(host)
-
   let token: string
 
-  if (stored) {
-    token = stored.accessToken
-  } else {
-    // Fall back to environment variables
-    token = process.env.YAFFLE_TOKEN || process.env.GITHUB_TOKEN || ""
+  // Prefer explicit environment credentials over stored ones.
+  token = process.env.YAFFLE_TOKEN || process.env.YAFFLE_API_TOKEN || process.env.GITHUB_TOKEN || ""
 
-    // Try gh auth token
-    if (!token) {
-      try {
-        token = execSync("gh auth token", {
-          encoding: "utf8",
-          stdio: ["pipe", "pipe", "ignore"],
-        }).trim()
-      } catch {
-        // Ignore
-      }
+  if (!token) {
+    const host = getHost(apiUrl)
+    const stored = await getCredentials(host)
+    token = stored?.accessToken || ""
+  }
+
+  if (!token) {
+    try {
+      token = execSync("gh auth token", {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "ignore"],
+      }).trim()
+    } catch {
+      // Ignore
     }
   }
 

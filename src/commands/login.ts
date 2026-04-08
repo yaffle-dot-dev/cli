@@ -14,12 +14,7 @@ import {
   loadConfig,
   saveConfig,
 } from "@yaffle/client"
-
-const DEFAULT_API_URL = "https://yaffle.dev"
-
-function getApiUrl(): string {
-  return process.env.YAFFLE_API_URL ?? DEFAULT_API_URL
-}
+import { DEFAULT_API_URL, resolveApiUrl } from "../lib/api-url.js"
 
 function getSettingsUrl(apiUrl: string): string {
   return `${apiUrl.replace(/\/+$/, "")}/app/settings`
@@ -27,11 +22,11 @@ function getSettingsUrl(apiUrl: string): string {
 
 export async function login(args: string[]): Promise<void> {
   // Parse --api-url flag (overrides env var)
-  let apiUrl = getApiUrl()
-  const apiUrlIdx = args.indexOf("--api-url")
-  if (apiUrlIdx !== -1 && args[apiUrlIdx + 1]) {
-    apiUrl = args[apiUrlIdx + 1]
-  }
+  const apiUrl = resolveApiUrl({
+    flagValue: getArg(args, "--api-url"),
+    envValue: process.env.YAFFLE_API_URL,
+    defaultValue: DEFAULT_API_URL,
+  })
 
   const settingsUrl = getSettingsUrl(apiUrl)
 
@@ -88,6 +83,14 @@ export async function login(args: string[]): Promise<void> {
   console.log()
   console.log("Successfully authenticated!")
   console.log(`Credentials saved to ~/.yaffle/credentials.json`)
+}
+
+function getArg(args: string[], flag: string): string {
+  const idx = args.indexOf(flag)
+  if (idx !== -1 && idx + 1 < args.length) {
+    return args[idx + 1]
+  }
+  return ""
 }
 
 async function promptSecret(question: string): Promise<string> {
