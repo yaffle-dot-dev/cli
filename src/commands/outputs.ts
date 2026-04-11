@@ -7,7 +7,6 @@ import {
   TokenAuth,
   getCredentials,
   getHost,
-  loadConfig,
   type Target,
   type TerraformOutput,
 } from "@yaffle/client"
@@ -77,12 +76,9 @@ export async function outputs(args: string[]): Promise<void> {
 }
 
 async function parseArgs(args: string[]): Promise<Args> {
-  const config = await loadConfig()
-
   const apiUrl = resolveApiUrl({
     flagValue: getArg(args, "--api-url"),
     envValue: process.env.YAFFLE_API_URL,
-    configValue: config.apiUrl,
     defaultValue: DEFAULT_API_URL,
   })
 

@@ -11,8 +11,6 @@ import {
   TokenAuth,
   saveCredentials,
   getHost,
-  loadConfig,
-  saveConfig,
 } from "@yaffle/client"
 import { DEFAULT_API_URL, resolveApiUrl } from "../lib/api-url.js"
 
@@ -74,11 +72,6 @@ export async function login(args: string[]): Promise<void> {
   // Save credentials
   const host = getHost(apiUrl)
   await saveCredentials(host, { accessToken: apiKey })
-
-  // Save API URL as default
-  const config = await loadConfig()
-  config.apiUrl = apiUrl
-  await saveConfig(config)
 
   console.log()
   console.log("Successfully authenticated!")
