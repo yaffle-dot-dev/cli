@@ -17,7 +17,7 @@ import {
 import { DEFAULT_API_URL, resolveApiUrl } from "../lib/api-url.js"
 
 function getSettingsUrl(apiUrl: string): string {
-  return `${apiUrl.replace(/\/+$/, "")}/app/settings`
+  return `${apiUrl.replace(/\/+$/, "")}/app/_/settings`
 }
 
 export async function login(args: string[]): Promise<void> {
