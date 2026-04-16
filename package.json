@@ -2,12 +2,14 @@
   "name": "@yaffle/cli",
   "version": "0.1.0",
   "description": "Yaffle CLI",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "yaffle": "./src/main.ts"
   },
   "scripts": {
     "build": "bun build src/main.ts --outdir dist --target bun",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,6 +21,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/react": "^19.2.14",
+    "bun-types": "^1.3.10",
     "typescript": "^5.3.3"
   }
 }
