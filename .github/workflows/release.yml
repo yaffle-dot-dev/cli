@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+            archive: yaffle-linux-x64.tar.gz
+            checksum: yaffle-linux-x64.sha256
+          - os: macos-13
+            name: darwin-x64
+            archive: yaffle-darwin-x64.tar.gz
+            checksum: yaffle-darwin-x64.sha256
+          - os: macos-14
+            name: darwin-arm64
+            archive: yaffle-darwin-arm64.tar.gz
+            checksum: yaffle-darwin-arm64.sha256
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install Bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build standalone binary
+        run: |
+          mkdir -p dist
+          bun build src/main.ts --compile --outfile dist/yaffle
+
+      - name: Package archive
+        run: |
+          tar -C dist -czf "${{ matrix.archive }}" yaffle
+          shasum -a 256 "${{ matrix.archive }}" > "${{ matrix.checksum }}"
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "${{ matrix.archive }}" \
+            "${{ matrix.checksum }}" \
+            --clobber

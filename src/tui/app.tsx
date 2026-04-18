@@ -10,7 +10,7 @@ import type {
   Run,
   WorkspaceWithRuns,
   YaffleClient,
-} from "@yaffle/client"
+} from "../lib/yaffle-client/index.js"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 
 import { parseSelector, resolveSelector } from "./selector.js"

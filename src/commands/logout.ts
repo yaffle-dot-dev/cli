@@ -2,7 +2,7 @@
  * yaffle logout - Remove stored credentials
  */
 
-import { removeCredentials, getHost } from "@yaffle/client"
+import { removeCredentials, getHost } from "../lib/yaffle-client/index.js"
 import { DEFAULT_API_URL, resolveApiUrl } from "../lib/api-url.js"
 
 export async function logout(args: string[]): Promise<void> {
