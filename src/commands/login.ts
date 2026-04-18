@@ -11,7 +11,7 @@ import {
   TokenAuth,
   saveCredentials,
   getHost,
-} from "../lib/yaffle-client/index.js"
+} from "../client.js"
 import { DEFAULT_API_URL, resolveApiUrl } from "../lib/api-url.js"
 
 function getSettingsUrl(apiUrl: string): string {

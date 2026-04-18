@@ -2,7 +2,7 @@
 
 `@yaffle/cli` is the Bun-based operator CLI for Yaffle.
 
-> Source of truth: this project lives in the main Yaffle monorepo. The standalone public repo is a one-way publish of this directory, and changes should land in the monorepo first.
+> Yaffle maintainers primarily work on this project from the main Yaffle monorepo. Community contributions in the public repo are welcome and are synced back into the monorepo after review.
 
 ## What it does
 

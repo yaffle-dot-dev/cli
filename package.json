@@ -4,6 +4,14 @@
   "description": "Yaffle CLI",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yaffle-dot-dev/cli.git"
+  },
+  "homepage": "https://github.com/yaffle-dot-dev/cli",
+  "bugs": {
+    "url": "https://github.com/yaffle-dot-dev/cli/issues"
+  },
   "bin": {
     "yaffle": "./src/main.ts"
   },
@@ -15,21 +23,13 @@
   "dependencies": {
     "@opentui/core": "^0.1.97",
     "@opentui/react": "^0.1.97",
-    "react": "^19.2.5",
-    "eventsource": "^4.1.0"
+    "eventsource": "^4.1.0",
+    "react": "^19.2.5"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/react": "^19.2.14",
     "bun-types": "^1.3.10",
     "typescript": "^5.3.3"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yaffle-dot-dev/cli.git"
-  },
-  "homepage": "https://github.com/yaffle-dot-dev/cli",
-  "bugs": {
-    "url": "https://github.com/yaffle-dot-dev/cli/issues"
   }
 }

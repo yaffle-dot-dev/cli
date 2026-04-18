@@ -3,6 +3,7 @@
  */
 
 import { EventSource } from "eventsource"
+
 import type { AuthProvider } from "./auth.js"
 import type {
   ApiResponse,
@@ -20,11 +21,8 @@ import type {
 } from "./types.js"
 
 export interface YaffleClientOptions {
-  /** Yaffle API base URL */
   apiUrl: string
-  /** Authentication provider */
   auth: AuthProvider
-  /** Logger for debug output */
   logger?: Logger
 }
 
@@ -46,17 +44,14 @@ export class YaffleClient {
   private log: Logger
 
   constructor(options: YaffleClientOptions) {
-    this.apiUrl = options.apiUrl.replace(/\/$/, "") // Remove trailing slash
+    this.apiUrl = options.apiUrl.replace(/\/$/, "")
     this.auth = options.auth
     this.log = options.logger ?? defaultLogger
   }
 
-  /**
-   * Make an authenticated API request
-   */
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
   ): Promise<T> {
     const credentials = await this.auth.getCredentials()
 
@@ -100,14 +95,11 @@ export class YaffleClient {
     return response.text()
   }
 
-  /**
-   * Find a preview by PR number or environment
-   */
   async findPreview(
     org: string,
     repo: string,
     target: Target,
-    workspace: string
+    workspace: string,
   ): Promise<Preview | null> {
     const params = new URLSearchParams({
       org,
@@ -122,23 +114,19 @@ export class YaffleClient {
     }
 
     const data = await this.request<ApiResponse<Preview[]>>(
-      `/api/previews?${params}`
+      `/api/previews?${params}`,
     )
 
     return data.data?.[0] || null
   }
 
-  /**
-   * Get outputs for a preview by fetching the full workspace data
-   */
   async getPreviewOutputs(
     org: string,
     repo: string,
     target: Target,
-    workspace: string
+    workspace: string,
   ): Promise<Record<string, TerraformOutput> | null> {
     try {
-      // Fetch workspace data from the appropriate endpoint
       const path = target.type === "pr"
         ? `/api/orgs/${encodeURIComponent(org)}/repos/${encodeURIComponent(repo)}/pr/${target.prNumber}`
         : `/api/orgs/${encodeURIComponent(org)}/repos/${encodeURIComponent(repo)}/env/${encodeURIComponent(target.name)}`
@@ -150,12 +138,11 @@ export class YaffleClient {
         }>
       }>>(path)
 
-      // Find the matching workspace
-      const ws = data.data?.workspaces?.find(
-        (w) => w.preview.workspacePath === workspace
+      const workspaceEntry = data.data?.workspaces?.find(
+        (item) => item.preview.workspacePath === workspace,
       )
 
-      return ws?.outputs ?? null
+      return workspaceEntry?.outputs ?? null
     } catch (err) {
       if (err instanceof Error && err.message.includes("404")) {
         return null
@@ -164,12 +151,9 @@ export class YaffleClient {
     }
   }
 
-  /**
-   * Wait for a preview to reach a terminal state using SSE
-   */
   async waitForPreview(
     previewId: string,
-    timeoutSeconds: number = 300
+    timeoutSeconds: number = 300,
   ): Promise<StreamUpdate> {
     const credentials = await this.auth.getCredentials()
 
@@ -203,7 +187,6 @@ export class YaffleClient {
 
           this.log.info(`Preview status: ${data.preview.status}`)
 
-          // Check for terminal states
           if (data.preview.status === "ready") {
             resolved = true
             clearTimeout(timeout)
@@ -244,9 +227,6 @@ export class YaffleClient {
     })
   }
 
-  /**
-   * Get outputs for a target, optionally waiting for it to be ready
-   */
   async getOutputs(options: {
     org: string
     repo: string
@@ -270,7 +250,7 @@ export class YaffleClient {
 
     if (!preview) {
       throw new Error(
-        `No preview found for ${org}/${repo} ${targetLabel} workspace=${workspace}`
+        `No preview found for ${org}/${repo} ${targetLabel} workspace=${workspace}`,
       )
     }
 
@@ -295,12 +275,9 @@ export class YaffleClient {
     }
   }
 
-  /**
-   * List all previews for a repository
-   */
   async listPreviews(org: string, repo: string): Promise<Preview[]> {
     const data = await this.request<ApiResponse<Preview[]>>(
-      `/api/previews?org=${encodeURIComponent(org)}&repo=${encodeURIComponent(repo)}`
+      `/api/previews?org=${encodeURIComponent(org)}&repo=${encodeURIComponent(repo)}`,
     )
     return data.data || []
   }

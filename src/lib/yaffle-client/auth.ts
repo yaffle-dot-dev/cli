@@ -5,15 +5,10 @@
 import type { Credentials, DeviceCodeResponse } from "./types.js"
 
 export interface AuthProvider {
-  /** Get current credentials, refreshing if needed */
   getCredentials(): Promise<Credentials>
-  /** Check if credentials are valid/present */
   isAuthenticated(): Promise<boolean>
 }
 
-/**
- * Static token auth - for CI/CD or pre-configured tokens
- */
 export class TokenAuth implements AuthProvider {
   constructor(private token: string) {}
 
@@ -26,26 +21,14 @@ export class TokenAuth implements AuthProvider {
   }
 }
 
-/**
- * OAuth Device Flow auth for CLI.
- *
- * Flow:
- * 1. Call initiate() to get device code and user code
- * 2. User visits verification URL and enters code
- * 3. Poll poll() until user approves or timeout
- * 4. Store returned credentials
- */
 export class DeviceFlowAuth implements AuthProvider {
   private credentials: Credentials | null = null
 
   constructor(
     private apiUrl: string,
-    private clientId: string
+    private clientId: string,
   ) {}
 
-  /**
-   * Start device flow - returns codes for user to enter
-   */
   async initiate(): Promise<DeviceCodeResponse> {
     const response = await fetch(`${this.apiUrl}/api/auth/device/code`, {
       method: "POST",
@@ -61,9 +44,6 @@ export class DeviceFlowAuth implements AuthProvider {
     return response.json()
   }
 
-  /**
-   * Poll for token after user approves
-   */
   async poll(deviceCode: string): Promise<Credentials | "pending" | "expired"> {
     const response = await fetch(`${this.apiUrl}/api/auth/device/token`, {
       method: "POST",
@@ -100,9 +80,6 @@ export class DeviceFlowAuth implements AuthProvider {
     return this.credentials
   }
 
-  /**
-   * Set credentials directly (e.g., loaded from config file)
-   */
   setCredentials(credentials: Credentials): void {
     this.credentials = credentials
   }
@@ -112,11 +89,9 @@ export class DeviceFlowAuth implements AuthProvider {
       throw new Error("Not authenticated. Run 'yaffle login' first.")
     }
 
-    // Check if token needs refresh
     if (this.credentials.expiresAt && this.credentials.refreshToken) {
       const expiresIn = this.credentials.expiresAt - Date.now()
       if (expiresIn < 60000) {
-        // Less than 1 minute - refresh
         await this.refresh()
       }
     }
@@ -157,11 +132,6 @@ export class DeviceFlowAuth implements AuthProvider {
   }
 }
 
-/**
- * GitHub OIDC auth for GitHub Actions.
- *
- * Uses GitHub's OIDC token to authenticate with Yaffle.
- */
 export class GitHubOIDCAuth implements AuthProvider {
   private credentials: Credentials | null = null
 
@@ -172,10 +142,8 @@ export class GitHubOIDCAuth implements AuthProvider {
       return this.credentials
     }
 
-    // Get OIDC token from GitHub Actions
     const oidcToken = await this.getGitHubOIDCToken()
 
-    // Exchange for Yaffle token
     const response = await fetch(`${this.apiUrl}/api/auth/oidc/github`, {
       method: "POST",
       headers: {
@@ -198,7 +166,6 @@ export class GitHubOIDCAuth implements AuthProvider {
   }
 
   async isAuthenticated(): Promise<boolean> {
-    // In GHA context, we can always try to get a token
     return !!process.env.ACTIONS_ID_TOKEN_REQUEST_URL
   }
 

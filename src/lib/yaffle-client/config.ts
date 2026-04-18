@@ -1,18 +1,15 @@
 /**
  * CLI configuration and credential storage.
- *
- * Stores credentials in ~/.yaffle/credentials.json (like Terraform).
  */
 
 import { readFile, writeFile, mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
 import type { Credentials } from "./types.js"
 
 export interface Config {
-  /** Default API URL */
   apiUrl?: string
-  /** Default org (inferred from git if not set) */
   defaultOrg?: string
 }
 
@@ -28,9 +25,6 @@ async function ensureConfigDir(): Promise<void> {
   await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 })
 }
 
-/**
- * Load config from ~/.yaffle/config.json
- */
 export async function loadConfig(): Promise<Config> {
   try {
     const content = await readFile(CONFIG_FILE, "utf-8")
@@ -40,9 +34,6 @@ export async function loadConfig(): Promise<Config> {
   }
 }
 
-/**
- * Save config to ~/.yaffle/config.json
- */
 export async function saveConfig(config: Config): Promise<void> {
   await ensureConfigDir()
   await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), {
@@ -50,9 +41,6 @@ export async function saveConfig(config: Config): Promise<void> {
   })
 }
 
-/**
- * Load credentials from ~/.yaffle/credentials.json
- */
 export async function loadCredentials(): Promise<StoredCredentials> {
   try {
     const content = await readFile(CREDENTIALS_FILE, "utf-8")
@@ -62,32 +50,23 @@ export async function loadCredentials(): Promise<StoredCredentials> {
   }
 }
 
-/**
- * Save credentials for a host
- */
 export async function saveCredentials(
   host: string,
-  credentials: Credentials
+  credentials: Credentials,
 ): Promise<void> {
   await ensureConfigDir()
   const all = await loadCredentials()
   all[host] = credentials
   await writeFile(CREDENTIALS_FILE, JSON.stringify(all, null, 2), {
-    mode: 0o600, // Only owner can read/write
+    mode: 0o600,
   })
 }
 
-/**
- * Get credentials for a host
- */
 export async function getCredentials(host: string): Promise<Credentials | null> {
   const all = await loadCredentials()
   return all[host] || null
 }
 
-/**
- * Remove credentials for a host
- */
 export async function removeCredentials(host: string): Promise<void> {
   const all = await loadCredentials()
   delete all[host]
@@ -96,9 +75,6 @@ export async function removeCredentials(host: string): Promise<void> {
   })
 }
 
-/**
- * Get the host part of a URL for credential lookup
- */
 export function getHost(apiUrl: string): string {
   try {
     const url = new URL(apiUrl)

@@ -1,32 +1,6 @@
 /**
- * ./index.js - Yaffle API client
- *
- * Usage:
- *
- * ```ts
- * import { YaffleClient, TokenAuth, DeviceFlowAuth } from "./index.js"
- *
- * // With static token (CI/CD)
- * const client = new YaffleClient({
- *   apiUrl: "https://yaffle.local:6969",
- *   auth: new TokenAuth(process.env.YAFFLE_TOKEN),
- * })
- *
- * // With device flow (CLI)
- * const auth = new DeviceFlowAuth("https://yaffle.local:6969", "yaffle-cli")
- * const { userCode, verificationUri } = await auth.initiate()
- * console.log(`Go to ${verificationUri} and enter code: ${userCode}`)
- * // ... poll until approved ...
- *
- * // Get outputs
- * const result = await client.getOutputs({
- *   org: "myorg",
- *   repo: "myrepo",
- *   target: { type: "pr", prNumber: 123 },
- *   workspace: "apps/infra",
- *   wait: true,
- * })
- * ```
+ * Local CLI copy of the Yaffle client layer so the public CLI repo is
+ * self-contained.
  */
 
 export { YaffleClient } from "./client.js"

@@ -1,5 +1,5 @@
 /**
- * Yaffle API types
+ * Yaffle API types.
  */
 
 export interface Preview {
@@ -191,28 +191,16 @@ export interface StreamUpdate {
   outputs: Record<string, TerraformOutput> | null
 }
 
-/**
- * Target for fetching outputs - either a PR or a named environment
- */
 export type Target =
   | { type: "pr"; prNumber: number }
   | { type: "env"; name: string }
 
-/**
- * Credentials for authenticating with Yaffle API
- */
 export interface Credentials {
-  /** Access token (JWT or session token) */
   accessToken: string
-  /** Optional refresh token for token refresh */
   refreshToken?: string
-  /** Token expiry timestamp (ms since epoch) */
   expiresAt?: number
 }
 
-/**
- * Result of device flow initiation
- */
 export interface DeviceCodeResponse {
   deviceCode: string
   userCode: string
@@ -222,9 +210,6 @@ export interface DeviceCodeResponse {
   interval: number
 }
 
-/**
- * API response wrapper
- */
 export interface ApiResponse<T> {
   data: T
 }

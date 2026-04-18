@@ -9,7 +9,7 @@ import {
   getHost,
   type Target,
   type TerraformOutput,
-} from "../lib/yaffle-client/index.js"
+} from "../client.js"
 import { execSync } from "node:child_process"
 import { DEFAULT_API_URL, resolveApiUrl } from "../lib/api-url.js"
 

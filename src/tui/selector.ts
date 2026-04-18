@@ -1,4 +1,4 @@
-import type { DependencyGraph } from "../lib/yaffle-client/index.js"
+import type { DependencyGraph } from "../client.js"
 
 export interface ParsedSelector {
   raw: string
