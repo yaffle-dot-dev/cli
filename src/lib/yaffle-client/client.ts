@@ -18,6 +18,7 @@ import type {
   StreamUpdate,
   Target,
   TerraformOutput,
+  WorkspacePreview,
 } from "./types.js"
 
 export interface YaffleClientOptions {
@@ -126,6 +127,20 @@ export class YaffleClient {
     target: Target,
     workspace: string,
   ): Promise<Record<string, TerraformOutput> | null> {
+    const details = await this.getWorkspaceDetails(org, repo, target, workspace)
+    return details.outputs
+  }
+
+  private async getWorkspaceDetails(
+    org: string,
+    repo: string,
+    target: Target,
+    workspace: string,
+  ): Promise<{
+    preview: WorkspacePreview
+    runs: Run[]
+    outputs: Record<string, TerraformOutput> | null
+  }> {
     try {
       const path = target.type === "pr"
         ? `/api/orgs/${encodeURIComponent(org)}/repos/${encodeURIComponent(repo)}/pr/${target.prNumber}`
@@ -133,7 +148,8 @@ export class YaffleClient {
 
       const data = await this.request<ApiResponse<{
         workspaces: Array<{
-          preview: { workspacePath: string }
+          preview: WorkspacePreview
+          runs: Run[]
           outputs: Record<string, TerraformOutput> | null
         }>
       }>>(path)
@@ -142,13 +158,51 @@ export class YaffleClient {
         (item) => item.preview.workspacePath === workspace,
       )
 
-      return workspaceEntry?.outputs ?? null
+      if (!workspaceEntry) {
+        throw new Error(`Workspace ${workspace} not found in target response`)
+      }
+
+      return {
+        preview: workspaceEntry.preview,
+        runs: workspaceEntry.runs,
+        outputs: workspaceEntry.outputs,
+      }
     } catch (err) {
       if (err instanceof Error && err.message.includes("404")) {
-        return null
+        throw new Error(`No workspace data found for ${workspace}`)
       }
       throw err
     }
+  }
+
+  private getLatestRun(runs: Run[]): Run | null {
+    if (runs.length === 0) {
+      return null
+    }
+
+    return [...runs].sort((a, b) => {
+      const left = new Date(a.createdAt).getTime()
+      const right = new Date(b.createdAt).getTime()
+      return right - left
+    })[0] ?? null
+  }
+
+  private buildFailedWorkspaceError(options: {
+    targetLabel: string
+    workspace: string
+    previewStatus: string
+    latestRun: Run | null
+  }): Error {
+    const runSummary = options.latestRun
+      ? `${options.latestRun.runType} ${options.latestRun.status}`
+      : "no runs recorded"
+    const errorMessage = options.latestRun?.errorMessage?.trim()
+    const detail = errorMessage ? ` Latest run error: ${errorMessage}` : ""
+
+    return new Error(
+      `Cannot fetch outputs for ${options.targetLabel} workspace=${options.workspace}: `
+      + `workspace status is ${options.previewStatus} and latest run is ${runSummary}.${detail}`,
+    )
   }
 
   async waitForPreview(
@@ -238,6 +292,7 @@ export class YaffleClient {
     previewId: string
     status: string
     outputs: Record<string, TerraformOutput> | null
+    latestRun: Run | null
   }> {
     const { org, repo, target, workspace, wait = false, waitTimeout = 300 } = options
 
@@ -258,20 +313,48 @@ export class YaffleClient {
 
     let outputs: Record<string, TerraformOutput> | null = null
     let status: PreviewStatus = preview.status
+    let latestRun: Run | null = null
 
     if (wait && preview.status !== "ready") {
       this.log.info(`Waiting for preview to be ready (timeout: ${waitTimeout}s)...`)
-      const result = await this.waitForPreview(preview.id, waitTimeout)
-      status = result.preview?.status ?? "failed"
-      outputs = result.outputs
-    } else if (preview.status === "ready") {
-      outputs = await this.getPreviewOutputs(org, repo, target, workspace)
+      try {
+        const result = await this.waitForPreview(preview.id, waitTimeout)
+        status = result.preview?.status ?? "failed"
+        outputs = result.outputs
+      } catch {
+        const details = await this.getWorkspaceDetails(org, repo, target, workspace)
+        latestRun = this.getLatestRun(details.runs)
+        throw this.buildFailedWorkspaceError({
+          targetLabel,
+          workspace,
+          previewStatus: details.preview.status,
+          latestRun,
+        })
+      }
+    }
+
+    if (status === "ready" || preview.status === "ready") {
+      const details = await this.getWorkspaceDetails(org, repo, target, workspace)
+      status = details.preview.status
+      latestRun = this.getLatestRun(details.runs)
+
+      if (details.preview.status === "failed" || latestRun?.status === "failed") {
+        throw this.buildFailedWorkspaceError({
+          targetLabel,
+          workspace,
+          previewStatus: details.preview.status,
+          latestRun,
+        })
+      }
+
+      outputs = details.outputs
     }
 
     return {
       previewId: preview.id,
       status,
       outputs,
+      latestRun,
     }
   }
 
