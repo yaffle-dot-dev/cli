@@ -1,0 +1,43 @@
+{
+  "contract_version": 1,
+  "operation": "graph",
+  "target": {
+    "environment": "main"
+  },
+  "selection": {
+    "workspaces": []
+  },
+  "result": {
+    "kind": "succeeded",
+    "summary": "environment-resolved graph for 'main'\n1 workspaces, 0 edges\nleft to right = dependency depth\n\nmain [named]\n[infra/single]"
+  },
+  "workspaces": [
+    {
+      "workspace_path": "infra/single"
+    }
+  ],
+  "outputs": {},
+  "diagnostics": [
+    {
+      "level": "info",
+      "code": "config_loaded",
+      "message": "<config-path>"
+    },
+    {
+      "level": "warning",
+      "code": "repo_namespace_unresolved",
+      "message": "Could not infer the repo namespace from git metadata; same-repo dependency filtering may be less strict."
+    },
+    {
+      "level": "info",
+      "code": "graph_node",
+      "message": "Resolved graph node 'infra/single'.",
+      "workspace_path": "infra/single",
+      "details": {
+        "dependencies": [],
+        "dependents": [],
+        "topological_index": 0
+      }
+    }
+  ]
+}

@@ -3,29 +3,93 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TOFU_VERSION: 1.11.5
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
 
-      - name: Install Bun
+      - name: Install pinned OpenTofu
         run: |
-          curl -fsSL https://bun.sh/install | bash
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          curl --fail --location --silent --show-error \
+            --output tofu.zip \
+            "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          curl --fail --location --silent --show-error \
+            --output SHA256SUMS \
+            "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_SHA256SUMS"
+          expected="$(awk -v file="tofu_${TOFU_VERSION}_linux_amd64.zip" '$2 == file { print $1 }' SHA256SUMS)"
+          test -n "$expected"
+          test "$(sha256sum tofu.zip | cut -d ' ' -f 1)" = "$expected"
+          unzip -q tofu.zip -d "$RUNNER_TEMP/tofu"
+          echo "$RUNNER_TEMP/tofu" >> "$GITHUB_PATH"
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
 
-      - name: Typecheck
-        run: bun run typecheck
+      - name: Smoke packaged binary
+        run: |
+          nix flake check
+          nix build .#yaffle
+          file result/bin/yaffle | grep -Eq "static(-pie|ally) linked"
+          version="$(nix eval .#yaffle.version --raw)"
+          mkdir -p dist/package
+          cp result/bin/yaffle README.md LICENSE dist/package/
+          tar -C dist/package -czf dist/yaffle-smoke.tar.gz yaffle README.md LICENSE
+          mkdir dist/extracted
+          tar -C dist/extracted -xzf dist/yaffle-smoke.tar.gz
+          test "$(cd dist/extracted && PATH=/usr/bin:/bin ./yaffle --version)" = "yaffle $version"
+          cd dist/extracted
+          PATH=/usr/bin:/bin ./yaffle --help >/dev/null
 
-      - name: Test
-        run: bun test
+  opentofu-compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        tofu-version: [1.8.8, 1.11.5]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install OpenTofu ${{ matrix.tofu-version }}
+        env:
+          TOFU_VERSION: ${{ matrix.tofu-version }}
+        run: |
+          curl --fail --location --silent --show-error \
+            --output tofu.zip \
+            "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+          curl --fail --location --silent --show-error \
+            --output SHA256SUMS \
+            "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_SHA256SUMS"
+          expected="$(awk -v file="tofu_${TOFU_VERSION}_linux_amd64.zip" '$2 == file { print $1 }' SHA256SUMS)"
+          test -n "$expected"
+          test "$(sha256sum tofu.zip | cut -d ' ' -f 1)" = "$expected"
+          unzip -q tofu.zip -d "$RUNNER_TEMP/tofu"
+          echo "$RUNNER_TEMP/tofu" >> "$GITHUB_PATH"
+      - run: cargo test -p yaffle-tofu --locked
+      - run: cargo test -p yaffle-engine --test fixture-repos --locked
 
-      - name: Build
-        run: bun run build
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: cargo tree --workspace --locked --duplicates
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --deny warnings

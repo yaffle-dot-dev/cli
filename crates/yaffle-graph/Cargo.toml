@@ -1,0 +1,22 @@
+[package]
+name = "yaffle-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+hcl.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dependencies.yaffle-config]
+path = "../yaffle-config"
+
+[dependencies.yaffle-contracts]
+path = "../yaffle-contracts"
+
+[dev-dependencies]
+tempfile.workspace = true

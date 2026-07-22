@@ -1,63 +1,164 @@
 name: Release
 
 on:
-  release:
-    types:
-      - published
+  push:
+    tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-binaries:
-    name: Build ${{ matrix.name }}
+  binaries:
+    name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            name: linux-x64
-            archive: yaffle-linux-x64.tar.gz
-            checksum: yaffle-linux-x64.sha256
-          - os: macos-13
-            name: darwin-x64
-            archive: yaffle-darwin-x64.tar.gz
-            checksum: yaffle-darwin-x64.sha256
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
           - os: macos-14
-            name: darwin-arm64
-            archive: yaffle-darwin-arm64.tar.gz
-            checksum: yaffle-darwin-arm64.sha256
-
+            target: aarch64-apple-darwin
     steps:
-      - name: Check out release tag
-        uses: actions/checkout@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342
 
-      - name: Install Bun
+      - name: Validate release version
+        shell: bash
         run: |
-          curl -fsSL https://bun.sh/install | bash
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          cargo_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "yaffle-cli") | .version')"
+          test "$version" = "$cargo_version"
+          test "$version" = "$(nix eval .#yaffle.version --raw)"
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build standalone binary
+      - name: Build and smoke binary
+        shell: bash
         run: |
-          mkdir -p dist
-          bun build src/main.ts --compile --outfile dist/yaffle
+          version="${GITHUB_REF_NAME#v}"
+          nix build .#yaffle
+          binary="result/bin/yaffle"
+          test "$($binary --version)" = "yaffle $version"
+          "$binary" --help >/dev/null
 
-      - name: Package archive
+      - name: Verify portable Linux binary
+        if: runner.os == 'Linux'
+        run: file result/bin/yaffle | grep -Eq "static(-pie|ally) linked"
+
+      - name: Verify portable macOS binary
+        if: runner.os == 'macOS'
         run: |
-          tar -C dist -czf "${{ matrix.archive }}" yaffle
-          shasum -a 256 "${{ matrix.archive }}" > "${{ matrix.checksum }}"
+          if otool -L result/bin/yaffle | grep -q /nix/store; then
+            otool -L result/bin/yaffle
+            exit 1
+          fi
 
-      - name: Upload release assets
+      - name: Create archive and checksum
+        id: package
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          archive="yaffle-${version}-${{ matrix.target }}.tar.gz"
+          mkdir -p dist/package
+          cp result/bin/yaffle README.md LICENSE dist/package/
+          tar -C dist/package -czf "dist/$archive" yaffle README.md LICENSE
+          (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
+
+      - name: Stage release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.target }}
+          path: dist/yaffle-*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: "*"
+          path: dist
+          merge-multiple: true
+
+      - name: Publish assets atomically with the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
-            "${{ matrix.archive }}" \
-            "${{ matrix.checksum }}" \
-            --clobber
+          test "$(gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)" = "true"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME"
+
+  homebrew:
+    needs: [binaries, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: yaffle-homebrew-tap
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: "*"
+          path: dist
+          merge-multiple: true
+
+      - name: Create tap token
+        id: tap-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.YAFFLE_INTERNAL_GH_APP_ID }}
+          private-key: ${{ secrets.YAFFLE_INTERNAL_GH_APP_PRIVATE_KEY }}
+          owner: yaffle-dot-dev
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: yaffle-dot-dev/homebrew-tap
+          token: ${{ steps.tap-token.outputs.token }}
+          path: tap
+          persist-credentials: true
+
+      - name: Publish formula
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          version="${VERSION#v}"
+          mkdir -p tap/Formula
+          if [[ -f tap/Formula/yaffle.rb ]]; then
+            current_version="$(ruby -ne 'puts $1 if $_ =~ /^  version "([^"]+)"/' tap/Formula/yaffle.rb)"
+            if ! ruby -e 'require "rubygems"; exit(Gem::Version.new(ARGV[0]) > Gem::Version.new(ARGV[1]) ? 0 : 1)' "$version" "$current_version"; then
+              echo "Tap already contains yaffle $current_version; not replacing it with $version."
+              exit 0
+            fi
+          fi
+          bash scripts/render-homebrew-formula.sh \
+            "$version" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
+            dist > tap/Formula/yaffle.rb
+          ruby -c tap/Formula/yaffle.rb
+          git -C tap config user.name "yaffle-publisher[bot]"
+          git -C tap config user.email "yaffle-publisher[bot]@users.noreply.github.com"
+          git -C tap add Formula/yaffle.rb
+          git -C tap commit -m "update yaffle to $version"
+          git -C tap push

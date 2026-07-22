@@ -1,0 +1,36 @@
+{
+  "contractVersion": 1,
+  "snapshotId": "sos_01JZXNS2Q6MEW4NZ4M9T8J2R7K",
+  "publicationVersion": 7,
+  "producer": {
+    "organizationId": "org_01JZXNQ4DXQ3Z3JSYJ1K98BH7V",
+    "organization": "acme",
+    "repositoryId": "repo_01JZXNR3HVCYH0X7PMSB9T3F6A",
+    "repository": "platform",
+    "workspace": "infra/shared",
+    "environment": {
+      "class": "transient_managed",
+      "name": "review-42"
+    }
+  },
+  "sourceRevision": {
+    "vcs": "git",
+    "commitSha": "0123456789abcdef0123456789abcdef01234567",
+    "ref": "refs/heads/main"
+  },
+  "state": {
+    "identity": "statev_01JZXNT7PND73G9ESQZT15E0H8",
+    "serial": 42
+  },
+  "publishedAt": "2026-07-10T12:00:00Z",
+  "values": {
+    "apiUrl": {
+      "value": "https://api.example.com",
+      "sensitive": false
+    },
+    "databasePassword": {
+      "value": null,
+      "sensitive": true
+    }
+  }
+}

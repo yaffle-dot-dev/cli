@@ -1,0 +1,17 @@
+version = 1
+
+[[environments]]
+name = "main"
+
+[cloud]
+
+[[cloud.triggers.github.push]]
+ref_patterns = ["refs/heads/main"]
+environment = "main"
+
+[[cloud.triggers.github.pull_request]]
+branch_patterns = ["*"]
+
+[[workspaces]]
+path = "infra/app"
+environments = ["*"]

@@ -1,0 +1,31 @@
+[package]
+name = "yaffle-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+hcl.workspace = true
+hmac = "0.12.1"
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+time.workspace = true
+
+[dependencies.yaffle-contracts]
+path = "../yaffle-contracts"
+
+[dependencies.yaffle-config]
+path = "../yaffle-config"
+
+[dependencies.yaffle-graph]
+path = "../yaffle-graph"
+
+[dependencies.yaffle-tofu]
+path = "../yaffle-tofu"

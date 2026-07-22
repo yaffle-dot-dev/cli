@@ -1,24 +1,20 @@
 # Contributing
 
-Thanks for helping improve the Yaffle CLI.
+Contributions to the Yaffle CLI and its Rust engine crates are welcome.
 
-## Source and sync model
+## Before opening a pull request
 
-- Yaffle maintainers primarily work in the main Yaffle monorepo.
-- Community contributions are welcome in this public repository.
-- Accepted public changes are synced back into the monorepo and then synced forward again.
-
-## Before you open a PR
-
-Run:
+Install the pinned Rust toolchain and a supported OpenTofu release, then run:
 
 ```bash
-bun install
-bun run typecheck
-bun test
-bun run build
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-## License
+Add tests through public interfaces and keep machine-readable output backward compatible within a
+contract version. Do not include credentials, Terraform state, provider caches, or generated build
+artifacts.
 
-By intentionally submitting a contribution, you agree that your contribution will be licensed under the MIT license for this project.
+By intentionally submitting a contribution, you agree that it is licensed under this project's MIT
+license.

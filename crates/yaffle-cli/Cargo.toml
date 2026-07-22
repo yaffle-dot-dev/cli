@@ -1,0 +1,30 @@
+[package]
+name = "yaffle-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+description = "Environment orchestration for Terraform and OpenTofu"
+
+[[bin]]
+name = "yaffle"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22.1"
+clap.workspace = true
+clap_complete = "4.5.60"
+getrandom = "0.3.4"
+serde_json.workspace = true
+sha2.workspace = true
+
+[dependencies.yaffle-contracts]
+path = "../yaffle-contracts"
+
+[dependencies.yaffle-engine]
+path = "../yaffle-engine"
+
+[dev-dependencies]
+tempfile.workspace = true

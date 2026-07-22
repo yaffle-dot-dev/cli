@@ -1,0 +1,17 @@
+[package]
+name = "yaffle-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[dependencies.yaffle-contracts]
+path = "../yaffle-contracts"

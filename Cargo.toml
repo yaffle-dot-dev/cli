@@ -1,0 +1,35 @@
+[workspace]
+members = [
+  "crates/yaffle-cli",
+  "crates/yaffle-contracts",
+  "crates/yaffle-config",
+  "crates/yaffle-engine",
+  "crates/yaffle-graph",
+  "crates/yaffle-tofu",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/yaffle-dot-dev/cli"
+homepage = "https://yaffle.dev"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.39", features = ["derive"] }
+hcl = { package = "hcl-rs", version = "0.19.7" }
+reqwest = { version = "0.12.24", default-features = false, features = [
+  "blocking",
+  "json",
+  "rustls-tls",
+] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.9"
+tempfile = "3.23.0"
+time = { version = "0.3.41", features = ["formatting", "parsing"] }
+thiserror = "2.0.12"
+toml = "0.8.23"

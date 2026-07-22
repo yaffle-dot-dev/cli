@@ -1,0 +1,31 @@
+version = 1
+
+[[environments]]
+name = "main"
+
+[[workspaces]]
+path = "infra/single"
+environments = ["main"]
+outputs.service_name = { visibility = "internal" }
+
+[[workspaces.activation]]
+key = "preview-ready"
+kind = "webhook"
+timeout = "10s"
+failure = "failed"
+scopes = ["usable"]
+
+[workspaces.activation.request]
+url = "http://127.0.0.1:9999/hooks/preview-ready"
+method = "POST"
+
+[[workspaces.verification]]
+key = "preview-smoke"
+kind = "webhook"
+timeout = "10s"
+failure = "failed"
+scopes = ["acceptable"]
+
+[workspaces.verification.request]
+url = "http://127.0.0.1:9999/hooks/preview-smoke"
+method = "POST"

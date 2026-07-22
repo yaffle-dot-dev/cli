@@ -1,0 +1,11 @@
+{
+  "contract_version": 1,
+  "operation": "graph",
+  "selection": {
+    "workspaces": []
+  },
+  "error": {
+    "code": "config_not_found",
+    "message": "<working-directory>"
+  }
+}

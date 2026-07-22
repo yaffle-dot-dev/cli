@@ -1,7 +1,7 @@
 # Code of Conduct
 
-Be respectful, constructive, and kind.
+Be respectful, constructive, and kind. Harassment, personal attacks, discrimination, and bad-faith
+behavior are not acceptable in project spaces.
 
-We want this project to be welcoming to contributors of all experience levels. Harassment, personal attacks, and bad-faith behavior are not acceptable.
-
-If you have a problem with conduct in this project, contact the Yaffle maintainers privately.
+Report conduct concerns privately to `conduct@yaffle.dev`. Maintainers will review reports
+confidentially and may remove content or restrict participation to protect the community.
