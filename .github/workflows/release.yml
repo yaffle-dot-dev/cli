@@ -100,7 +100,11 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes \
-            --title "$GITHUB_REF_NAME"
+            --title "$GITHUB_REF_NAME" \
+            --draft
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
 
   homebrew:
     needs: [binaries, publish]
