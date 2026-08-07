@@ -6,6 +6,8 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::sync::{LazyLock, Mutex};
@@ -327,6 +329,200 @@ fn converge_remote_state_chain_fixture_persists_outputs_for_downstream_workspace
         json!("https://shared.internal")
     );
     assert_eq!(outputs.outputs["https_port"].value, json!(8443));
+}
+
+#[test]
+fn converge_persists_partial_state_when_apply_fails() {
+    let repo = copy_fixture_repo("converge-partial-apply-state");
+
+    let error = with_local_first_env_disabled(|| {
+        execute(
+            &EngineRequest {
+                operation: EngineOperation::Converge,
+                target: Some(EnvironmentTarget {
+                    environment: "main".to_string(),
+                }),
+                selection: WorkspaceSelection::default(),
+                wait_for: None,
+            },
+            repo.path(),
+        )
+    })
+    .expect_err("converge should report the failed apply");
+
+    assert_eq!(error.error.code, "tofu_apply_failed");
+
+    let state_path = repo
+        .path()
+        .join(".yaffle/state/main/infra/single/terraform.tfstate");
+    let state = fs::read_to_string(&state_path).expect("partial state should persist");
+    let state: serde_json::Value = serde_json::from_str(&state).expect("state should be JSON");
+    #[cfg(unix)]
+    {
+        assert_eq!(
+            fs::metadata(&state_path)
+                .expect("state metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+        );
+        for directory in [
+            repo.path().join(".yaffle"),
+            repo.path().join(".yaffle/state"),
+            repo.path().join(".yaffle/state/main"),
+            repo.path().join(".yaffle/state/main/infra"),
+            repo.path().join(".yaffle/state/main/infra/single"),
+        ] {
+            assert_eq!(
+                fs::metadata(&directory)
+                    .expect("state directory metadata should exist")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700,
+                "state directory '{}' should be private",
+                directory.display(),
+            );
+        }
+    }
+    let lineage = state["lineage"]
+        .as_str()
+        .expect("partial state should contain a lineage")
+        .to_string();
+    let resource_id = state["resources"]
+        .as_array()
+        .expect("partial state should contain resources")
+        .iter()
+        .find(|resource| resource["name"] == "created_before_failure")
+        .and_then(|resource| resource["instances"][0]["attributes"]["id"].as_str())
+        .expect("the created resource should have an ID")
+        .to_string();
+
+    fs::write(
+        repo.path().join("infra/single/main.tf"),
+        r#"terraform {
+  required_version = ">= 1.8.0"
+}
+
+resource "terraform_data" "created_before_failure" {
+  input = "durable"
+}
+"#,
+    )
+    .expect("the recovered configuration should be writable");
+
+    let recovered = with_local_first_env_disabled(|| {
+        execute(
+            &EngineRequest {
+                operation: EngineOperation::Converge,
+                target: Some(EnvironmentTarget {
+                    environment: "main".to_string(),
+                }),
+                selection: WorkspaceSelection::default(),
+                wait_for: None,
+            },
+            repo.path(),
+        )
+    })
+    .expect("the recovered converge should succeed");
+
+    assert_eq!(recovered.result.kind, OperationResultKind::Succeeded);
+
+    let recovered_state = fs::read_to_string(state_path).expect("recovered state should persist");
+    let recovered_state: serde_json::Value =
+        serde_json::from_str(&recovered_state).expect("recovered state should be JSON");
+    let recovered_resource_id = recovered_state["resources"]
+        .as_array()
+        .expect("recovered state should contain resources")
+        .iter()
+        .find(|resource| resource["name"] == "created_before_failure")
+        .and_then(|resource| resource["instances"][0]["attributes"]["id"].as_str())
+        .expect("the recovered resource should have an ID");
+
+    assert_eq!(recovered_state["lineage"], lineage);
+    assert_eq!(recovered_resource_id, resource_id);
+}
+
+#[test]
+fn destroy_persists_partial_state_when_destroy_fails() {
+    let repo = copy_fixture_repo("destroy-partial-state");
+
+    let converge = with_local_first_env_disabled(|| {
+        execute(
+            &EngineRequest {
+                operation: EngineOperation::Converge,
+                target: Some(EnvironmentTarget {
+                    environment: "main".to_string(),
+                }),
+                selection: WorkspaceSelection::default(),
+                wait_for: None,
+            },
+            repo.path(),
+        )
+    })
+    .expect("the fixture should converge before destroy");
+
+    assert_eq!(converge.result.kind, OperationResultKind::Succeeded);
+
+    let error = with_local_first_env_disabled(|| {
+        execute(
+            &EngineRequest {
+                operation: EngineOperation::Destroy,
+                target: Some(EnvironmentTarget {
+                    environment: "main".to_string(),
+                }),
+                selection: WorkspaceSelection::default(),
+                wait_for: None,
+            },
+            repo.path(),
+        )
+    })
+    .expect_err("destroy should report the failed provisioner");
+
+    assert_eq!(error.error.code, "tofu_destroy_failed");
+
+    let state_path = repo
+        .path()
+        .join(".yaffle/state/main/infra/single/terraform.tfstate");
+    let state = fs::read_to_string(&state_path).expect("partial destroy state should persist");
+
+    assert!(state.contains("fails_during_destroy"));
+    assert!(!state.contains("deleted_before_failure"));
+
+    fs::write(
+        repo.path().join("infra/single/main.tf"),
+        r#"terraform {
+  required_version = ">= 1.8.0"
+}
+
+resource "terraform_data" "fails_during_destroy" {
+  input = "retained"
+}
+"#,
+    )
+    .expect("the recovered configuration should be writable");
+
+    let recovered = with_local_first_env_disabled(|| {
+        execute(
+            &EngineRequest {
+                operation: EngineOperation::Destroy,
+                target: Some(EnvironmentTarget {
+                    environment: "main".to_string(),
+                }),
+                selection: WorkspaceSelection::default(),
+                wait_for: None,
+            },
+            repo.path(),
+        )
+    })
+    .expect("the recovered destroy should succeed");
+
+    assert_eq!(recovered.result.kind, OperationResultKind::Succeeded);
+    assert!(
+        !state_path.exists(),
+        "successful destroy should remove state"
+    );
 }
 
 #[test]

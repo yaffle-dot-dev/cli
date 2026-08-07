@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc};
@@ -1028,7 +1028,7 @@ fn execute_destroy_operation(
             &["init", "-input=false", "-no-color"],
             "tofu_init_failed",
         )?;
-        run_tofu_command(
+        let destroy_result = run_tofu_command(
             request,
             &tofu_resolution,
             &prepared_repo,
@@ -1036,10 +1036,16 @@ fn execute_destroy_operation(
             workspace_path,
             &["destroy", "-auto-approve", "-input=false", "-no-color"],
             "tofu_destroy_failed",
-        )?;
+        );
 
         if workspace_execution.uses_local_backend {
+            settle_command_with_state_persistence(
+                destroy_result,
+                persist_local_backend_state(request, repo_context, &prepared_repo, workspace_path),
+            )?;
             remove_local_backend_state(request, repo_context, workspace_path)?;
+        } else {
+            destroy_result?;
         }
     }
 
@@ -1410,7 +1416,7 @@ fn execute_single_workspace_converge(
     let mut progress_reporter = channel_reporter
         .as_mut()
         .map(|reporter| reporter as &mut dyn EngineProgressReporter);
-    run_tofu_command_with_progress(
+    let apply_result = run_tofu_command_with_progress(
         request,
         tofu_resolution,
         prepared_repo,
@@ -1419,7 +1425,7 @@ fn execute_single_workspace_converge(
         &["apply", "-auto-approve", "-input=false", "-no-color"],
         "tofu_apply_failed",
         &mut progress_reporter,
-    )?;
+    );
 
     if workspace_execution.uses_local_backend {
         emit_progress_via_channel(
@@ -1429,7 +1435,12 @@ fn execute_single_workspace_converge(
                 phase: ConvergeWorkspacePhase::RecordingState,
             },
         );
-        persist_local_backend_state(request, repo_context, prepared_repo, &workspace_path)?;
+        settle_command_with_state_persistence(
+            apply_result,
+            persist_local_backend_state(request, repo_context, prepared_repo, &workspace_path),
+        )?;
+    } else {
+        apply_result?;
     }
 
     emit_progress_via_channel(
@@ -5064,7 +5075,55 @@ fn persist_local_backend_state(
         return Ok(());
     }
 
-    fs::create_dir_all(&destination_state_dir).map_err(|error| {
+    create_private_state_directory(
+        request,
+        &repo_context.repo_root,
+        &destination_state_dir,
+        workspace_path,
+    )?;
+
+    for file_name in ["terraform.tfstate", "terraform.tfstate.backup"] {
+        let source_path = source_state_dir.join(file_name);
+        if !source_path.is_file() {
+            continue;
+        }
+
+        persist_state_file_atomically(
+            request,
+            &source_path,
+            &destination_state_dir.join(file_name),
+            workspace_path,
+            file_name,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn create_private_state_directory(
+    request: &EngineRequest,
+    repo_root: &Path,
+    destination: &Path,
+    workspace_path: &str,
+) -> Result<(), EngineError> {
+    let state_root = repo_root.join(".yaffle");
+    let relative = destination.strip_prefix(&state_root).map_err(|error| {
+        request_error(
+            request,
+            "workspace_state_persist_failed",
+            format!(
+                "State directory '{}' is outside the local state root for workspace '{}': {error}",
+                destination.display(),
+                workspace_path
+            ),
+        )
+    })?;
+
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    builder.mode(0o700);
+    builder.create(destination).map_err(|error| {
         request_error(
             request,
             "workspace_state_persist_failed",
@@ -5075,25 +5134,175 @@ fn persist_local_backend_state(
         )
     })?;
 
-    for file_name in ["terraform.tfstate", "terraform.tfstate.backup"] {
-        let source_path = source_state_dir.join(file_name);
-        if !source_path.is_file() {
-            continue;
-        }
-
-        fs::copy(&source_path, destination_state_dir.join(file_name)).map_err(|error| {
+    #[cfg(unix)]
+    {
+        let mut directory = state_root;
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(|error| {
             request_error(
                 request,
                 "workspace_state_persist_failed",
                 format!(
-                    "Failed to persist local state file '{}' for workspace '{}': {error}",
+                    "Failed to secure state directory '{}' for workspace '{}': {error}",
+                    directory.display(),
+                    workspace_path
+                ),
+            )
+        })?;
+        for component in relative.components() {
+            directory.push(component);
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(
+                |error| {
+                    request_error(
+                        request,
+                        "workspace_state_persist_failed",
+                        format!(
+                            "Failed to secure state directory '{}' for workspace '{}': {error}",
+                            directory.display(),
+                            workspace_path
+                        ),
+                    )
+                },
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn persist_state_file_atomically(
+    request: &EngineRequest,
+    source: &Path,
+    destination: &Path,
+    workspace_path: &str,
+    file_name: &str,
+) -> Result<(), EngineError> {
+    let destination_directory = destination
+        .parent()
+        .expect("persisted state file should have a parent directory");
+    let mut source_file = fs::File::open(source).map_err(|error| {
+        request_error(
+            request,
+            "workspace_state_persist_failed",
+            format!(
+                "Failed to open local state file '{}' for workspace '{}': {error}",
+                file_name, workspace_path
+            ),
+        )
+    })?;
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(destination_directory).map_err(|error| {
+            request_error(
+                request,
+                "workspace_state_persist_failed",
+                format!(
+                    "Failed to prepare local state file '{}' for workspace '{}': {error}",
                     file_name, workspace_path
                 ),
             )
         })?;
+
+    #[cfg(unix)]
+    temporary
+        .as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|error| {
+            request_error(
+                request,
+                "workspace_state_persist_failed",
+                format!(
+                    "Failed to secure local state file '{}' for workspace '{}': {error}",
+                    file_name, workspace_path
+                ),
+            )
+        })?;
+
+    io::copy(&mut source_file, temporary.as_file_mut()).map_err(|error| {
+        request_error(
+            request,
+            "workspace_state_persist_failed",
+            format!(
+                "Failed to write local state file '{}' for workspace '{}': {error}",
+                file_name, workspace_path
+            ),
+        )
+    })?;
+    temporary.as_file().sync_all().map_err(|error| {
+        request_error(
+            request,
+            "workspace_state_persist_failed",
+            format!(
+                "Failed to sync local state file '{}' for workspace '{}': {error}",
+                file_name, workspace_path
+            ),
+        )
+    })?;
+    temporary.persist(destination).map_err(|error| {
+        request_error(
+            request,
+            "workspace_state_persist_failed",
+            format!(
+                "Failed to install local state file '{}' for workspace '{}': {}",
+                file_name, workspace_path, error.error
+            ),
+        )
+    })?;
+
+    #[cfg(unix)]
+    {
+        fs::set_permissions(destination, fs::Permissions::from_mode(0o600)).map_err(|error| {
+            request_error(
+                request,
+                "workspace_state_persist_failed",
+                format!(
+                    "Failed to secure installed state file '{}' for workspace '{}': {error}",
+                    file_name, workspace_path
+                ),
+            )
+        })?;
+        fs::File::open(destination_directory)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                request_error(
+                    request,
+                    "workspace_state_persist_failed",
+                    format!(
+                        "Failed to sync state directory for workspace '{}': {error}",
+                        workspace_path
+                    ),
+                )
+            })?;
     }
 
     Ok(())
+}
+
+fn settle_command_with_state_persistence<T>(
+    command_result: Result<T, EngineError>,
+    persistence_result: Result<(), EngineError>,
+) -> Result<T, EngineError> {
+    match (command_result, persistence_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(command_error), Ok(())) => Err(command_error),
+        (Ok(_), Err(persistence_error)) => Err(persistence_error),
+        (Err(mut command_error), Err(persistence_error)) => {
+            let persistence_message = persistence_error.error.message.clone();
+            let persistence_details = json!({
+                "code": persistence_error.error.code,
+                "message": persistence_message,
+                "details": persistence_error.error.details,
+            });
+            command_error.error.message = format!(
+                "{} State persistence also failed: {}",
+                command_error.error.message, persistence_message
+            );
+            command_error
+                .error
+                .details
+                .get_or_insert_with(BTreeMap::new)
+                .insert("state_persistence_error".to_string(), persistence_details);
+            Err(command_error)
+        }
+    }
 }
 
 fn remove_local_backend_state(
@@ -6101,6 +6310,38 @@ mod tests {
     use super::*;
 
     static TOFU_OVERRIDE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn command_error_remains_primary_when_state_persistence_also_fails() {
+        let request = EngineRequest {
+            operation: EngineOperation::Converge,
+            target: None,
+            selection: WorkspaceSelection::default(),
+            wait_for: None,
+        };
+        let command_error = request_error(&request, "tofu_apply_failed", "apply failed");
+        let persistence_error = request_error(
+            &request,
+            "workspace_state_persist_failed",
+            "state copy failed",
+        );
+
+        let error =
+            settle_command_with_state_persistence::<()>(Err(command_error), Err(persistence_error))
+                .expect_err("the command error should remain primary");
+
+        assert_eq!(error.error.code, "tofu_apply_failed");
+        assert!(error.error.message.contains("apply failed"));
+        assert!(error.error.message.contains("state copy failed"));
+        assert_eq!(
+            error
+                .error
+                .details
+                .as_ref()
+                .and_then(|details| { details["state_persistence_error"]["code"].as_str() }),
+            Some("workspace_state_persist_failed")
+        );
+    }
 
     #[test]
     fn selects_configured_non_sensitive_outputs_for_egress() {
