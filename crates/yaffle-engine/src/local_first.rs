@@ -1138,7 +1138,7 @@ impl LocalFirstRuntime {
 
     fn build() -> Result<Self, LocalFirstError> {
         let base_url = module_api_base_url()?;
-        let mut client_builder = Client::builder()
+        let mut client_builder = crate::cli_http_client_builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
             .redirect(Policy::none());
@@ -1502,6 +1502,10 @@ mod tests {
                     let mut buffer = [0_u8; 8192];
                     let bytes_read = stream.read(&mut buffer).expect("request should read");
                     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+                    assert_eq!(
+                        request_header_value(&request, "user-agent"),
+                        Some(concat!("yaffle-cli/", env!("CARGO_PKG_VERSION")))
+                    );
 
                     if request.starts_with("POST /api/sessions/anonymous HTTP/1.1") {
                         assert!(!request.contains("feature-token:"));
@@ -1554,6 +1558,14 @@ mod tests {
         fn authority(&self) -> &str {
             &self.authority
         }
+    }
+
+    fn request_header_value<'a>(request: &'a str, expected_name: &str) -> Option<&'a str> {
+        request.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case(expected_name)
+                .then_some(value.trim())
+        })
     }
 
     fn write_response(stream: &mut std::net::TcpStream, body: &str) {

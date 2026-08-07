@@ -44,6 +44,11 @@ use crate::local_first::{
 
 const CANONICAL_YAFFLE_MODULE_HOST: &str = "yaffle.dev";
 const MODULE_API_HOST_OVERRIDE_ENV_VAR: &str = "YAFFLE_MODULE_API_HOST";
+const YAFFLE_CLI_USER_AGENT: &str = concat!("yaffle-cli/", env!("CARGO_PKG_VERSION"));
+
+fn cli_http_client_builder() -> reqwest::blocking::ClientBuilder {
+    Client::builder().user_agent(YAFFLE_CLI_USER_AGENT)
+}
 
 pub use crate::local_first::{
     build_cloud_cli_authorize_url, check_lifecycle_admission, clear_local_cloud_auth,
@@ -4185,7 +4190,7 @@ fn dispatch_lifecycle_webhook(
         return Ok(());
     }
 
-    let client = Client::builder()
+    let client = cli_http_client_builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| request_error(request, "webhook_dispatch_failed", error.to_string()))?;
@@ -4537,7 +4542,7 @@ fn parse_duration_hint(value: &str) -> Result<Duration, EngineError> {
 }
 
 fn report_lifecycle_failure(callback_url: &str, reason: String) -> Result<(), LocalFirstError> {
-    Client::builder()
+    cli_http_client_builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|error| LocalFirstError::Http(error.to_string()))?
