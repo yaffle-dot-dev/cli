@@ -1,0 +1,8 @@
+version = 1
+
+[[environments]]
+name = "main"
+
+[[workspaces]]
+path = "infra/single"
+environments = ["main"]
