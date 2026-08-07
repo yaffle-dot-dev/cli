@@ -4322,15 +4322,23 @@ fn lifecycle_control_plane_dispatch_body(
                 },
             })
         }
-        LifecycleHookDispatch::GitHubRepositoryDispatch(github) => json!({
-            "kind": "github_repository_dispatch",
-            "github": {
-                "owner": github.owner,
-                "repo": github.repo,
-                "eventType": github.event_type,
-                "apiUrl": github.api_url,
-            },
-        }),
+        LifecycleHookDispatch::GitHubRepositoryDispatch(github) => {
+            let mut github_dispatch =
+                serde_json::Map::from_iter([("eventType".to_string(), json!(github.event_type))]);
+            if let Some(owner) = &github.owner {
+                github_dispatch.insert("owner".to_string(), json!(owner));
+            }
+            if let Some(repo) = &github.repo {
+                github_dispatch.insert("repo".to_string(), json!(repo));
+            }
+            if let Some(api_url) = &github.api_url {
+                github_dispatch.insert("apiUrl".to_string(), json!(api_url));
+            }
+            json!({
+                "kind": "github_repository_dispatch",
+                "github": github_dispatch,
+            })
+        }
     };
 
     Ok(json!({
@@ -6985,9 +6993,90 @@ module "shared" {
         .expect("dispatch body should build");
 
         assert_eq!(body["dispatch"]["kind"], "github_repository_dispatch");
+        assert_eq!(body["dispatch"]["github"]["owner"], "yaffle-dot-dev");
+        assert_eq!(body["dispatch"]["github"]["repo"], "yaffle");
         assert_eq!(body["dispatch"]["github"]["eventType"], "yaffle.activation");
+        assert!(body["dispatch"]["github"].get("apiUrl").is_none());
         assert_eq!(body["payload"]["item_key"], "control-plane");
         assert_eq!(body["itemId"], "item-1");
+    }
+
+    #[test]
+    fn omits_all_absent_optional_github_repository_dispatch_fields() {
+        let hook = LifecycleHook {
+            key: "control-plane".to_string(),
+            environments: vec!["main".to_string()],
+            kind: yaffle_config::LifecycleHookKind::GitHubRepositoryDispatch,
+            timeout: Some("30m".to_string()),
+            failure: LifecycleFailurePolicy::Failed,
+            scopes: vec!["usable".to_string()],
+            dispatch: LifecycleHookDispatch::GitHubRepositoryDispatch(
+                LifecycleGitHubRepositoryDispatch {
+                    owner: None,
+                    repo: None,
+                    event_type: "yaffle.activation".to_string(),
+                    api_url: None,
+                },
+            ),
+        };
+
+        let body = lifecycle_control_plane_dispatch_body(
+            &hook,
+            json!({}),
+            "run-1",
+            "item-1",
+            "main",
+            "apps/control-plane/infra",
+            "activation",
+        )
+        .expect("dispatch body should build");
+
+        let github = body["dispatch"]["github"]
+            .as_object()
+            .expect("github dispatch should be an object");
+        assert_eq!(github.get("eventType"), Some(&json!("yaffle.activation")));
+        assert!(!github.contains_key("owner"));
+        assert!(!github.contains_key("repo"));
+        assert!(!github.contains_key("apiUrl"));
+    }
+
+    #[test]
+    fn includes_all_present_optional_github_repository_dispatch_fields() {
+        let hook = LifecycleHook {
+            key: "control-plane".to_string(),
+            environments: vec!["main".to_string()],
+            kind: yaffle_config::LifecycleHookKind::GitHubRepositoryDispatch,
+            timeout: Some("30m".to_string()),
+            failure: LifecycleFailurePolicy::Failed,
+            scopes: vec!["usable".to_string()],
+            dispatch: LifecycleHookDispatch::GitHubRepositoryDispatch(
+                LifecycleGitHubRepositoryDispatch {
+                    owner: Some("yaffle-dot-dev".to_string()),
+                    repo: Some("yaffle".to_string()),
+                    event_type: "yaffle.activation".to_string(),
+                    api_url: Some("https://github.example.test/api/v3".to_string()),
+                },
+            ),
+        };
+
+        let body = lifecycle_control_plane_dispatch_body(
+            &hook,
+            json!({}),
+            "run-1",
+            "item-1",
+            "main",
+            "apps/control-plane/infra",
+            "activation",
+        )
+        .expect("dispatch body should build");
+
+        assert_eq!(body["dispatch"]["github"]["owner"], "yaffle-dot-dev");
+        assert_eq!(body["dispatch"]["github"]["repo"], "yaffle");
+        assert_eq!(body["dispatch"]["github"]["eventType"], "yaffle.activation");
+        assert_eq!(
+            body["dispatch"]["github"]["apiUrl"],
+            "https://github.example.test/api/v3"
+        );
     }
 
     #[test]
