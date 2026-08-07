@@ -948,6 +948,88 @@ fn converge_activation_webhook_fixture_dispatches_and_settles_activation() {
 }
 
 #[test]
+fn converge_omits_absent_optional_github_dispatch_fields() {
+    let _guard = WAIT_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let repo = copy_fixture_repo("converge-activation-webhook");
+    write_fixture_git_remote(repo.path());
+    let test_home = repo.path().join("test-home");
+    fs::create_dir_all(&test_home).expect("test home should exist");
+
+    fs::write(
+        repo.path().join("yaffle.toml"),
+        r#"version = 1
+
+[[environments]]
+name = "main"
+
+[[workspaces]]
+path = "infra/single"
+environments = ["main"]
+outputs.service_name = { visibility = "internal" }
+
+[[workspaces.activation]]
+key = "preview-ready"
+kind = "github_repository_dispatch"
+timeout = "10s"
+failure = "failed"
+scopes = ["usable"]
+
+[workspaces.activation.github]
+event_type = "yaffle.activation"
+"#,
+    )
+    .expect("fixture config should use a GitHub dispatch");
+
+    let backend_listener = TcpListener::bind("127.0.0.1:0").expect("backend listener should bind");
+    let backend_addr = backend_listener
+        .local_addr()
+        .expect("backend listener should have address");
+    let lifecycle_state = Arc::new(StdMutex::new(FakeLifecycleState::default()));
+    let backend_stop = Arc::new(AtomicBool::new(false));
+    let backend_thread = spawn_fake_lifecycle_backend(
+        backend_listener,
+        backend_addr,
+        lifecycle_state.clone(),
+        backend_stop.clone(),
+        true,
+    );
+
+    let _home_guard = ScopedEnvVar::set("HOME", &test_home);
+    let _module_api_guard =
+        ScopedEnvVar::set("YAFFLE_MODULE_API_HOST", format!("http://{backend_addr}"));
+
+    let error = execute(
+        &EngineRequest {
+            operation: EngineOperation::Converge,
+            target: Some(EnvironmentTarget {
+                environment: "main".to_string(),
+            }),
+            selection: WorkspaceSelection::default(),
+            wait_for: None,
+        },
+        repo.path(),
+    )
+    .expect_err("the fake control plane should reject the lifecycle dispatch");
+
+    backend_stop.store(true, Ordering::SeqCst);
+    wake_listener(backend_addr);
+    backend_thread.join().expect("backend thread should finish");
+
+    assert_eq!(error.error.code, "webhook_dispatch_failed");
+    let state = lifecycle_state.lock().expect("state lock should work");
+    assert_eq!(state.dispatch_bodies.len(), 1);
+    let github = state.dispatch_bodies[0]["dispatch"]["github"]
+        .as_object()
+        .expect("GitHub dispatch should be an object");
+    assert_eq!(github.get("eventType"), Some(&json!("yaffle.activation")));
+    assert!(!github.contains_key("owner"));
+    assert!(!github.contains_key("repo"));
+    assert!(!github.contains_key("apiUrl"));
+}
+
+#[test]
 fn converge_reports_failed_lifecycle_dispatch_with_cli_user_agent() {
     let _guard = WAIT_ENV_LOCK
         .lock()
@@ -1082,6 +1164,7 @@ struct FakeLifecycleState {
     verification_state: String,
     verification_summary: Option<String>,
     created_item_count: usize,
+    dispatch_bodies: Vec<serde_json::Value>,
 }
 
 impl Default for FakeLifecycleState {
@@ -1092,6 +1175,7 @@ impl Default for FakeLifecycleState {
             verification_state: "pending".to_string(),
             verification_summary: None,
             created_item_count: 0,
+            dispatch_bodies: Vec::new(),
         }
     }
 }
@@ -1210,6 +1294,20 @@ fn spawn_fake_lifecycle_backend(
                                     "_scopes": scopes
                                 }
                             }),
+                        );
+                    } else if request.starts_with("POST /api/lifecycle/dispatch HTTP/1.1") {
+                        let body = extract_http_body(&request);
+                        let payload: serde_json::Value =
+                            serde_json::from_str(&body).expect("dispatch payload should parse");
+                        lifecycle_state
+                            .lock()
+                            .expect("state lock should work")
+                            .dispatch_bodies
+                            .push(payload);
+                        write_http_json(
+                            &mut stream,
+                            400,
+                            json!({ "error": { "code": "INVALID_REQUEST", "message": "rejected for test" } }),
                         );
                     } else if request
                         .starts_with("POST /api/lifecycle/completions/token-1 HTTP/1.1")
