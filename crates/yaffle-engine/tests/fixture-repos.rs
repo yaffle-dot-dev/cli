@@ -845,6 +845,8 @@ fn converge_activation_webhook_fixture_dispatches_and_settles_activation() {
         .unwrap_or_else(|error| error.into_inner());
     let repo = copy_fixture_repo("converge-activation-webhook");
     write_fixture_git_remote(repo.path());
+    let test_home = repo.path().join("test-home");
+    fs::create_dir_all(&test_home).expect("test home should exist");
 
     let backend_listener = TcpListener::bind("127.0.0.1:0").expect("backend listener should bind");
     let backend_addr = backend_listener
@@ -881,10 +883,11 @@ fn converge_activation_webhook_fixture_dispatches_and_settles_activation() {
         backend_stop.clone(),
         true,
     );
-    let hook_thread = spawn_activation_receiver(hook_listener, hook_stop.clone());
+    let hook_thread = spawn_activation_receiver(hook_listener, hook_stop.clone(), true);
 
-    let previous_module_api_host = env::var_os("YAFFLE_MODULE_API_HOST");
-    env::set_var("YAFFLE_MODULE_API_HOST", format!("http://{backend_addr}"));
+    let _home_guard = ScopedEnvVar::set("HOME", &test_home);
+    let _module_api_guard =
+        ScopedEnvVar::set("YAFFLE_MODULE_API_HOST", format!("http://{backend_addr}"));
 
     let converge = execute(
         &EngineRequest {
@@ -898,14 +901,6 @@ fn converge_activation_webhook_fixture_dispatches_and_settles_activation() {
         repo.path(),
     )
     .expect("converge should succeed with activation webhook");
-
-    restore_env_var("YAFFLE_MODULE_API_HOST", previous_module_api_host);
-    backend_stop.store(true, Ordering::SeqCst);
-    hook_stop.store(true, Ordering::SeqCst);
-    wake_listener(backend_addr);
-    wake_listener(hook_addr);
-    backend_thread.join().expect("backend thread should finish");
-    hook_thread.join().expect("hook thread should finish");
 
     assert_eq!(converge.result.kind, OperationResultKind::Succeeded);
     assert!(converge
@@ -943,6 +938,89 @@ fn converge_activation_webhook_fixture_dispatches_and_settles_activation() {
     assert_eq!(conditions.get("verification_settled"), Some(&true));
     assert_eq!(conditions.get("usable"), Some(&true));
     assert_eq!(conditions.get("acceptable"), Some(&true));
+
+    backend_stop.store(true, Ordering::SeqCst);
+    hook_stop.store(true, Ordering::SeqCst);
+    wake_listener(backend_addr);
+    wake_listener(hook_addr);
+    backend_thread.join().expect("backend thread should finish");
+    hook_thread.join().expect("hook thread should finish");
+}
+
+#[test]
+fn converge_reports_failed_lifecycle_dispatch_with_cli_user_agent() {
+    let _guard = WAIT_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let repo = copy_fixture_repo("converge-activation-webhook");
+    write_fixture_git_remote(repo.path());
+    let test_home = repo.path().join("test-home");
+    fs::create_dir_all(&test_home).expect("test home should exist");
+
+    let backend_listener = TcpListener::bind("127.0.0.1:0").expect("backend listener should bind");
+    let backend_addr = backend_listener
+        .local_addr()
+        .expect("backend listener should have address");
+    let hook_listener = TcpListener::bind("127.0.0.1:0").expect("hook listener should bind");
+    let hook_addr = hook_listener
+        .local_addr()
+        .expect("hook listener should have address");
+
+    let config_path = repo.path().join("yaffle.toml");
+    let config = fs::read_to_string(&config_path).expect("fixture config should read");
+    fs::write(
+        &config_path,
+        config.replace(
+            "http://127.0.0.1:9999/hooks/preview-ready",
+            &format!("http://{hook_addr}/hooks/preview-ready"),
+        ),
+    )
+    .expect("fixture config should rewrite hook url");
+
+    let lifecycle_state = Arc::new(StdMutex::new(FakeLifecycleState::default()));
+    let backend_stop = Arc::new(AtomicBool::new(false));
+    let hook_stop = Arc::new(AtomicBool::new(false));
+    let backend_thread = spawn_fake_lifecycle_backend(
+        backend_listener,
+        backend_addr,
+        lifecycle_state.clone(),
+        backend_stop.clone(),
+        true,
+    );
+    let hook_thread = spawn_activation_receiver(hook_listener, hook_stop.clone(), false);
+
+    let _home_guard = ScopedEnvVar::set("HOME", &test_home);
+    let _module_api_guard =
+        ScopedEnvVar::set("YAFFLE_MODULE_API_HOST", format!("http://{backend_addr}"));
+
+    let error = execute(
+        &EngineRequest {
+            operation: EngineOperation::Converge,
+            target: Some(EnvironmentTarget {
+                environment: "main".to_string(),
+            }),
+            selection: WorkspaceSelection::default(),
+            wait_for: None,
+        },
+        repo.path(),
+    )
+    .expect_err("converge should report the rejected lifecycle hook");
+
+    assert_eq!(error.error.code, "webhook_dispatch_failed");
+    assert_eq!(
+        lifecycle_state
+            .lock()
+            .expect("state lock should work")
+            .activation_state,
+        "failed"
+    );
+
+    backend_stop.store(true, Ordering::SeqCst);
+    hook_stop.store(true, Ordering::SeqCst);
+    wake_listener(backend_addr);
+    wake_listener(hook_addr);
+    backend_thread.join().expect("backend thread should finish");
+    hook_thread.join().expect("hook thread should finish");
 }
 
 #[test]
@@ -952,6 +1030,8 @@ fn converge_blocks_before_infra_when_environment_governance_requires_cloud() {
         .unwrap_or_else(|error| error.into_inner());
     let repo = copy_fixture_repo("converge-activation-webhook");
     write_fixture_git_remote(repo.path());
+    let test_home = repo.path().join("test-home");
+    fs::create_dir_all(&test_home).expect("test home should exist");
 
     let backend_listener = TcpListener::bind("127.0.0.1:0").expect("backend listener should bind");
     let backend_addr = backend_listener
@@ -967,8 +1047,9 @@ fn converge_blocks_before_infra_when_environment_governance_requires_cloud() {
         false,
     );
 
-    let previous_module_api_host = env::var_os("YAFFLE_MODULE_API_HOST");
-    env::set_var("YAFFLE_MODULE_API_HOST", format!("http://{backend_addr}"));
+    let _home_guard = ScopedEnvVar::set("HOME", &test_home);
+    let _module_api_guard =
+        ScopedEnvVar::set("YAFFLE_MODULE_API_HOST", format!("http://{backend_addr}"));
 
     let error = execute(
         &EngineRequest {
@@ -983,7 +1064,6 @@ fn converge_blocks_before_infra_when_environment_governance_requires_cloud() {
     )
     .expect_err("converge should be blocked by environment governance");
 
-    restore_env_var("YAFFLE_MODULE_API_HOST", previous_module_api_host);
     backend_stop.store(true, Ordering::SeqCst);
     wake_listener(backend_addr);
     backend_thread.join().expect("backend thread should finish");
@@ -1031,6 +1111,12 @@ fn spawn_fake_lifecycle_backend(
             match listener.accept() {
                 Ok((mut stream, _)) => {
                     let request = read_http_request(&mut stream);
+                    if request.is_empty() {
+                        continue;
+                    }
+                    if !request.starts_with("POST /api/lifecycle/completions/") {
+                        assert_cli_user_agent(&request);
+                    }
                     if request.starts_with("POST /api/sessions/anonymous HTTP/1.1") {
                         write_http_json(
                             &mut stream,
@@ -1132,6 +1218,9 @@ fn spawn_fake_lifecycle_backend(
                         let body = extract_http_body(&request);
                         let payload: serde_json::Value =
                             serde_json::from_str(&body).expect("callback payload should parse");
+                        if payload["status"] == "failed" {
+                            assert_cli_user_agent(&request);
+                        }
                         let mut state = lifecycle_state.lock().expect("state lock should work");
                         let is_activation = request.contains("token-1");
                         if is_activation {
@@ -1242,6 +1331,7 @@ fn spawn_fake_lifecycle_backend(
 fn spawn_activation_receiver(
     listener: TcpListener,
     stop: Arc<AtomicBool>,
+    should_accept: bool,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         listener
@@ -1256,6 +1346,18 @@ fn spawn_activation_receiver(
             match listener.accept() {
                 Ok((mut stream, _)) => {
                     let request = read_http_request(&mut stream);
+                    if request.is_empty() {
+                        continue;
+                    }
+                    assert_cli_user_agent(&request);
+                    if !should_accept {
+                        write_http_json(
+                            &mut stream,
+                            500,
+                            json!({ "error": "hook rejected for test" }),
+                        );
+                        continue;
+                    }
                     if request.starts_with("POST /hooks/preview-ready HTTP/1.1") {
                         let body = extract_http_body(&request);
                         let payload: serde_json::Value =
@@ -1362,6 +1464,37 @@ fn restore_env_var(name: &str, previous: Option<std::ffi::OsString>) {
     } else {
         env::remove_var(name);
     }
+}
+
+struct ScopedEnvVar {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl ScopedEnvVar {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = env::var_os(name);
+        env::set_var(name, value);
+        Self { name, previous }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        restore_env_var(self.name, self.previous.take());
+    }
+}
+
+fn assert_cli_user_agent(request: &str) {
+    let user_agent = request.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("user-agent")
+            .then_some(value.trim())
+    });
+    assert_eq!(
+        user_agent,
+        Some(concat!("yaffle-cli/", env!("CARGO_PKG_VERSION")))
+    );
 }
 
 fn wake_listener(address: std::net::SocketAddr) {
