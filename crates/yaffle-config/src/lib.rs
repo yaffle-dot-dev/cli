@@ -158,6 +158,15 @@ pub enum ConfigError {
     Validation(String),
 }
 
+/// Legacy approval parsing never grants review or apply authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyApprovals {
+    Compatibility,
+    Reject,
+}
+
+const REVIEW_MIGRATION_GUIDANCE: &str = "Open Settings > Review policies and use the inline legacy approval migration. Retain existing gates until an admin confirms cutover; remove cloud.approvals only after confirmed migration.";
+
 pub fn validate_environment_name(environment: &str) -> AnyhowResult<()> {
     let environment = environment.trim();
     if environment.is_empty() {
@@ -178,6 +187,37 @@ pub fn validate_environment_name(environment: &str) -> AnyhowResult<()> {
 }
 
 pub fn parse_yaffle_toml(input: &str) -> Result<YaffleConfig, ConfigError> {
+    parse_yaffle_toml_with_legacy_approvals(input, LegacyApprovals::Compatibility)
+}
+
+/// Reject mode is for coordinated retirement validation, not an enforcement switch.
+pub fn parse_yaffle_toml_with_legacy_approvals(
+    input: &str,
+    legacy_approvals: LegacyApprovals,
+) -> Result<YaffleConfig, ConfigError> {
+    // Inspect actual attributes before typed deserialization can reject malformed
+    // rules or normalize empty ones. Comments and string contents are not keys.
+    let document: toml::Value =
+        toml::from_str(input).map_err(|error| ConfigError::ParseToml(error.to_string()))?;
+    if document
+        .get("cloud")
+        .and_then(|cloud| cloud.get("approvals"))
+        .is_some()
+    {
+        match legacy_approvals {
+            LegacyApprovals::Compatibility => {
+                eprintln!(
+                    "[yaffle.toml] cloud.approvals is deprecated. {REVIEW_MIGRATION_GUIDANCE}"
+                );
+            }
+            LegacyApprovals::Reject => {
+                return Err(ConfigError::Validation(format!(
+                    "cloud.approvals is retired. {REVIEW_MIGRATION_GUIDANCE}"
+                )));
+            }
+        }
+    }
+    // Keep the existing typed parser's validation and source locations unchanged.
     let raw: RawConfig =
         toml::from_str(input).map_err(|error| ConfigError::ParseToml(error.to_string()))?;
     normalize_and_validate(raw)
@@ -204,10 +244,9 @@ fn normalize_and_validate(raw: RawConfig) -> Result<YaffleConfig, ConfigError> {
     }
 
     if raw.approvals.is_some() {
-        errors.push(
-            "top-level approvals are no longer supported; move them under cloud.approvals"
-                .to_string(),
-        );
+        errors.push(format!(
+            "top-level approvals are no longer supported. {REVIEW_MIGRATION_GUIDANCE}"
+        ));
     }
 
     if raw.workspaces.is_empty() {
@@ -1105,14 +1144,73 @@ environments = ["main"]
 workspaces = ["infra/app"]
 environments = ["main"]
 approvers = ["github:user:alice"]
+
+[[cloud.approvals]]
+workspaces = ["infra/*"]
+environments = ["*"]
+approvers = ["github:team:acme/operators", "github:user:bob"]
 "#;
 
         let config = parse_yaffle_toml(input).expect("config should parse");
-        assert_eq!(config.cloud.approvals.len(), 1);
+        assert_eq!(config.cloud.approvals.len(), 2);
         assert_eq!(
             config.cloud.approvals[0].approvers,
             vec!["github:user:alice"]
         );
+        assert_eq!(config.cloud.approvals[1].workspaces, vec!["infra/*"]);
+        assert_eq!(config.cloud.approvals[1].environments, vec!["*"]);
+        assert_eq!(
+            config.cloud.approvals[1].approvers,
+            vec!["github:team:acme/operators", "github:user:bob"]
+        );
+        assert_eq!(
+            parse_yaffle_toml_with_legacy_approvals(input, LegacyApprovals::Compatibility)
+                .expect("explicit compatibility should preserve rules"),
+            config
+        );
+    }
+
+    #[test]
+    fn rejects_actual_legacy_attributes_before_typed_validation_when_retired() {
+        for attribute in [
+            "[cloud]\napprovals = []",
+            "[\"cloud\"]\n\"approvals\" = []",
+            "cloud.approvals = []",
+            "cloud = { approvals = [] }",
+            "[cloud]\napprovals = \"private-rule-content\"",
+            "[cloud.approvals]\napprovers = [\"private-rule-content\"]",
+            "[[cloud.approvals]]\napprovers = [\"private-rule-content\"]",
+        ] {
+            let input = format!(
+                "version = 1\n{attribute}\n[[workspaces]]\npath = \"infra\"\nenvironments = \"*\"\n"
+            );
+            let error = parse_yaffle_toml_with_legacy_approvals(&input, LegacyApprovals::Reject)
+                .expect_err("any actual legacy attribute must be rejected");
+            let message = error.to_string();
+            assert!(matches!(error, ConfigError::Validation(_)));
+            assert!(message.contains("cloud.approvals is retired"));
+            assert!(message.contains("Settings > Review policies"));
+            assert!(message.contains("only after confirmed migration"));
+            assert!(!message.contains("private-rule-content"));
+        }
+    }
+
+    #[test]
+    fn retirement_ignores_mentions_and_compatibility_preserves_empty_rules() {
+        let input = "version = 1\n[[workspaces]]\npath = \"infra\"\nenvironments = \"*\"\n";
+        let mentions = format!(
+            "{input}# cloud.approvals = []\n[workspaces.variables]\nnote = '[[cloud.approvals]]'\n"
+        );
+        let config = parse_yaffle_toml_with_legacy_approvals(&mentions, LegacyApprovals::Reject)
+            .expect("comments and strings are not legacy attributes");
+        assert!(config.cloud.approvals.is_empty());
+        assert_eq!(
+            config.workspaces[0].variables["note"],
+            VariableValue::String("[[cloud.approvals]]".to_string())
+        );
+        let empty = parse_yaffle_toml(&format!("{input}[cloud]\napprovals = []\n"))
+            .expect("default parsing remains compatible with empty legacy rules");
+        assert!(empty.cloud.approvals.is_empty());
     }
 
     #[test]
@@ -1182,6 +1280,10 @@ approvers = ["github:user:alice"]
         assert!(error
             .to_string()
             .contains("top-level approvals are no longer supported"));
+        assert!(error.to_string().contains("Settings > Review policies"));
+        assert!(!error
+            .to_string()
+            .contains("move them under cloud.approvals"));
     }
 
     #[test]
