@@ -59,6 +59,19 @@ login uses an OAuth public-client flow with PKCE and stores the resulting creden
 Commands with `--json` emit one versioned JSON document on stdout. Stable output shapes and process
 exit codes are documented in [the CLI contract](docs/cli-contract.md).
 
+Legacy `cloud.approvals` fields remain readable during the review-policy migration, including
+empty fields, but emit a static deprecation warning on stderr without changing JSON stdout.
+Configure reviews in **Settings > Review policies**. Keep existing gates until an organization
+administrator confirms the repository's migration, then remove the retired field. Changing local
+TOML does not override retained hosted review requirements or confer review/apply permission.
+Migrated repositories use hosted fresh plans; the CLI has no hosted review-receipt protocol.
+
+The `yaffle-config` public parser also exposes
+`parse_yaffle_toml_with_legacy_approvals(input, LegacyApprovals::Reject)` for coordinated retirement
+validation. It rejects actual fields before typed normalization, including empty or malformed
+values; comments and string contents are not fields. The ordinary parser remains compatible for
+mixed-version rollout. This validation option is not a deployment or authorization switch.
+
 ## Development
 
 ```bash
